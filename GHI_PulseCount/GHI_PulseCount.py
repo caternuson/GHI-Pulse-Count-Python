@@ -1,9 +1,15 @@
-import RPi.GPIO as IO
-IO.setwarnings(False)
-IO.setmode(IO.BCM)
-
-# GPIO Pins
-CNT_EN = 22
+#----------------------------------------------------------------------------
+# GHI_PulseCount.py
+#
+# Raspberry Pi Python library for use with GHI PulseCount.
+#  https://www.ghielectronics.com/catalog/product/465
+# a breakout board for the LSI LS7366R
+#  http://www.lsicsi.com/pdfs/Data_Sheets/LS7366R.pdf
+#
+# Carter Nelson
+# 2017-04-28
+#----------------------------------------------------------------------------
+import spidev
 
 # MDR0 configuration data - the configuration byte is formed with
 # single segments taken from each group and ORing all together.
@@ -71,44 +77,88 @@ LOAD_OTR = 0xE4
 class GHI_PulseCount(object):
     """GHI PulseCounter."""
 
-    def __init__(self, spi=None, **kwargs):
-        # Configure GPIO
-        IO.setup(CNT_EN, IO.OUT)
-        IO.output(CNT_EN, IO.HIGH)
-        
+    def __init__(self, ):
         # Setup SPI interface.
-        if spi is None:
-            import spidev
-            spi = spidev.SpiDev()
-            spi.open(0,0)
-        self.spi = spi
-    
-    def get_cntr(self, ):
-        '''Get counts from CNTR.'''
-        bytes = self.spi.xfer2([READ_CNTR,0x00,0x00,0x00,0x00])
-        return bytes[1]<<24 | bytes[2]<<16 | bytes[3]<<8 | bytes[4]
-    
-    def get_otr(self, ):
-        '''Get counts from OTR.'''
-        bytes = self.spi.xfer2([READ_OTR,0x00,0x00,0x00,0x00])
-        return bytes[1]<<24 | bytes[2]<<16 | bytes[3]<<8 | bytes[4]
-    
-    def clear_str(self, ):
-        '''Clear the status register.'''
-        self.spi.writebytes([CLR_STR])
+        self.spi = spidev.SpiDev()
+        self.spi.open(0, 0)
         
-    def clear_cntr(self, ):
-        '''Clear the counter.'''
-        self.spi.writebytes([CLR_CNTR])
+        # Default config
+        self.write_mdr0(QUADRX1 | FREE_RUN | DISABLE_INDX | FILTER_1)
+        self.write_mdr1(BYTE_4 | EN_CNTR)
+        
+        # Set to zero at start
+        self.set_counts(0)
+        
+    def get_counts(self, ):
+        b = self.read_cntr()
+        return (b[0] & 0xFF) << 24 |  \
+               (b[1] & 0xFF) << 16 |  \
+               (b[2] & 0xFF) <<  8 |  \
+               (b[3] & 0xFF)
+            
+    def set_counts(self, value):
+        self.write_dtr(value)
+        self.load_cntr()
+        
+    def get_byte_mode(self, ):
+        """Return current counter mode number of bytes (1 to 4)."""
+        return 4 - (self.read_mdr1()[0] & 0x03)
     
     def clear_mdr0(self, ):
-        '''Clear MDR0.'''
+        """Clear MDR0."""
         self.spi_writebytes([CLR_MDR0])
-
-    def enable_cntr(self, ):
-        '''Enable counting.'''
-        IO.output(CNT_EN, IO.HIGH)
+    
+    def clear_mdr1(self, ):
+        """Clear MDR1."""
+        self.spi_writebytes([CLR_MDR1])
         
-    def disable_cntr(self,):
-        '''Disable counting.'''
-        IO.output(CNT_EN, IO.LOW)
+    def clear_cntr(self, ):
+        """Clear the counter."""
+        self.spi.writebytes([CLR_CNTR])
+    
+    def clear_str(self, ):
+        """Clear the status register."""
+        self.spi.writebytes([CLR_STR])
+    
+    def read_mdr0(self, ):
+        """Output MDR0 serially on MISO."""
+        return self.spi.xfer2([READ_MDR0, 0x00])[1:]
+    
+    def read_mdr1(self, ):
+        """Output MDR1 serially on MISO."""
+        return self.spi.xfer2([READ_MDR1, 0x00])[1:]
+    
+    def read_cntr(self, ):
+        """Transfer CNTR to OTR, then output OTR serially on MISO."""
+        return self.spi.xfer2([READ_CNTR,0x00,0x00,0x00,0x00])[1:]
+    
+    def read_otr(self, ):
+        """Output OTR serially on MISO."""
+        return self.spi.xfer2([READ_OTR,0x00,0x00,0x00,0x00])[1:]
+    
+    def read_str(self, ):
+        """Output STR serially on MISO."""
+        return self.spi.xfer2([READ_STR,0x00])[1:]
+    
+    def write_mdr0(self, mode):
+        """Write serial data at MOSI into MDR0."""
+        self.spi.writebytes([WRITE_MDR0, mode])
+    
+    def write_mdr1(self, mode):
+        """Write serial data at MOSI into MDR1."""
+        self.spi.writebytes([WRITE_MDR1, mode])
+        
+    def write_dtr(self, value):
+        """Write serial data at MOSI into DTR."""
+        self.spi.writebytes([WRITE_DTR, value >> 24 & 0xFF,
+                                        value >> 16 & 0xFF,
+                                        value >>  8 & 0xFF,
+                                        value       & 0xFF])
+    
+    def load_cntr(self, ):
+        """Transfer DTR to CNTR in parallel."""
+        self.spi.writebytes([LOAD_CNTR])
+        
+    def load_otr(self, ):
+        """Transfer CNTR to OTR in parallel."""
+        self.spi.writebytes([LOAD_OTR])
