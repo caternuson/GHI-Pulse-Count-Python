@@ -81,6 +81,7 @@ class GHI_PulseCount(object):
         # Setup SPI interface.
         self.spi = spidev.SpiDev()
         self.spi.open(0, 0)
+        self.spi.max_speed_hz = 50000
         
         # Default config
         self.write_mdr0(QUADRX1 | FREE_RUN | DISABLE_INDX | FILTER_1)
